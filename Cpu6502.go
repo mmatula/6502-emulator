@@ -24,7 +24,13 @@ func addToAccumulator(value uint8) {
 	carry = a <= value
 	overflow = (prevA >= 128 && a < 128) || (prevA < 128 && a >= 128)
 }
-
+func jumpIfTrue(condition bool) {
+	if condition {
+		pc = uint16(int(pc) + int(int8(memory[pc + 1])))
+	} else {
+		pc += 2
+	}
+}
 func main() {
 	// LDA $23
 	memory[0x0000] = 0xA5
@@ -234,6 +240,78 @@ func opAslAbsoluteX() {
 	memory[address + uint16(x)] = shiftLeft(memory[address + uint16(x)])
 	setZeroAndNegative(a)
 	pc += 3
+}
+
+
+// BCC:
+func opBcc() {
+	// BCC *+23
+	// opcode = $90
+	jumpIfTrue(!carry)
+}
+
+
+// BCS:
+func opBcs() {
+	// BCS *+23
+	// opcode = $B0
+	jumpIfTrue(carry)
+}
+
+
+// BEQ:
+func opBeq() {
+	// BEQ *+23
+	// opcode = $F0
+	jumpIfTrue(zero)
+}
+
+
+// BIT:
+func opBitZeroPage() {
+	// BIT $80
+	// opcode = $24
+	var address = memory[pc + 1]
+	var value = memory[address]
+	negative = value & 128 == 128
+	overflow = value & 64 == 64
+	zero = value & a == 0
+	pc += 2
+}
+
+func opBitAbsolute() {
+	// BIT $1080
+	// opcode = $2C
+	var address = uint16(memory[pc + 1]) + (uint16(memory[pc + 2]) << 8)
+	var value = memory[address]
+	negative = value & 128 == 128
+	overflow = value & 64 == 64
+	zero = value & a == 0
+	pc += 3
+}
+
+
+// BMI:
+func opBmi() {
+	// BMI *+23
+	// opcode = $30
+	jumpIfTrue(negative)
+}
+
+
+// BNE:
+func opBne() {
+	// BNE *+23
+	// opcode = $D0
+	jumpIfTrue(!zero)
+}
+
+
+// BPL:
+func opBpl() {
+	// BPL *+23
+	// opcode = $10
+	jumpIfTrue(!negative)
 }
 
 
