@@ -1,10 +1,10 @@
 package cpu
 
 // registers
-var pc uint16	// program counter
-var sp uint8	// stack pointer
-var a uint8		// accumulator
-var x, y uint8	// index registers
+var pc uint16 = 0		// program counter
+var sp uint8 = 0xFF		// stack pointer
+var a uint8				// accumulator
+var x, y uint8			// index registers
 var carry, zero, interruptDisable, decimalMode, breakCommand, overflow, negative bool	// processor status (flags)
 
 // memory
@@ -15,7 +15,7 @@ type op func()
 
 var CodeToOp = [256]op {
 	// 0x00 - 0x0F
-	nil,
+	brk,
 	nil,
 	nil,
 	nil,
@@ -41,7 +41,7 @@ var CodeToOp = [256]op {
 	nil,
 	func() { asl(zeroPageX); pc += 2 },
 	nil,
-	nil,
+	clc,
 	nil,
 	nil,
 	nil,
@@ -51,7 +51,7 @@ var CodeToOp = [256]op {
 	nil,
 
 	// 0x20 - 0x2F
-	nil,
+	jsr,
 	func() { and(indexedIndirect); pc += 2 },
 	nil,
 	nil,
@@ -88,38 +88,38 @@ var CodeToOp = [256]op {
 
 	// 0x40 - 0x4F
 	nil,
+	func() { eor(indexedIndirect); pc += 2 },
 	nil,
 	nil,
 	nil,
+	func() { eor(zeroPage); pc += 2 },
+	func() { lsr(zeroPage); pc += 2 },
 	nil,
 	nil,
+	func() { eor(immediate); pc += 2 },
+	func() { lsr(accumulator); pc++ },
 	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
+	func() { jmp(absoluteAddress); pc += 3 },
+	func() { eor(absolute); pc += 3 },
+	func() { lsr(absolute); pc += 3 },
 	nil,
 
 	// 0x50 - 0x5F
+	bvc,
+	func() { eor(indirectIndexed); pc += 2 },
 	nil,
 	nil,
 	nil,
+	func() { eor(zeroPageX); pc += 2 },
+	func() { lsr(zeroPageX); pc += 2 },
+	nil,
+	cli,
+	func() { eor(absoluteY); pc += 3 },
 	nil,
 	nil,
 	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
+	func() { eor(absoluteX); pc += 3 },
+	func() { lsr(absoluteX); pc += 3 },
 	nil,
 
 	// 0x60 - 0x6F
@@ -135,13 +135,13 @@ var CodeToOp = [256]op {
 	func() { adc(immediate); pc += 2 },
 	nil,
 	nil,
-	nil,
+	func() { jmp(indirectAddress); pc += 3 },
 	func() { adc(absolute); pc += 3 },
 	nil,
 	nil,
 
 	// 0x70 - 0x7F
-	nil,
+	bvs,
 	func() { adc(indirectIndexed); pc += 2 },
 	nil,
 	nil,
@@ -167,7 +167,7 @@ var CodeToOp = [256]op {
 	nil,
 	nil,
 	nil,
-	nil,
+	dey,
 	nil,
 	nil,
 	nil,
@@ -221,7 +221,7 @@ var CodeToOp = [256]op {
 	func() { lda(zeroPageX); pc += 2 },
 	func() { ldx(zeroPageY); pc += 2 },
 	nil,
-	nil,
+	clv,
 	func() { lda(absoluteY); pc += 3 },
 	nil,
 	nil,
@@ -231,57 +231,57 @@ var CodeToOp = [256]op {
 	nil,
 
 	// 0xC0 - 0xCF
+	func() { cpy(immediate); pc += 2 },
+	func() { cmp(indexedIndirect); pc += 2 },
 	nil,
 	nil,
+	func() { cpy(zeroPage); pc += 2 },
+	func() { cmp(zeroPage); pc += 2 },
+	func() { dec(zeroPage); pc += 2 },
 	nil,
+	iny,
+	func() { cmp(immediate); pc += 2 },
+	dex,
 	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
+	func() { cpy(absolute); pc += 3 },
+	func() { cmp(absolute); pc += 3 },
+	func() { dec(absolute); pc += 3 },
 	nil,
 
 	// 0xD0 - 0xDF
 	bne,
+	func() { cmp(indirectIndexed); pc += 2 },
 	nil,
 	nil,
 	nil,
+	func() { cmp(zeroPageX); pc += 2 },
+	func() { dec(zeroPageX); pc += 2 },
+	nil,
+	cld,
+	func() { cmp(absoluteY); pc += 3 },
 	nil,
 	nil,
 	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
+	func() { cmp(absoluteX); pc += 3 },
+	func() { dec(absoluteX); pc += 3 },
 	nil,
 
 	// 0xE0 - 0xEF
+	func() { cpx(immediate); pc += 2 },
 	nil,
 	nil,
 	nil,
+	func() { cpx(zeroPage); pc += 2 },
 	nil,
+	func() { inc(zeroPage); pc += 2 },
 	nil,
+	inx,
 	nil,
+	nop,
 	nil,
+	func() { cpx(absolute); pc += 3 },
 	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
-	nil,
+	func() { inc(absolute); pc += 3 },
 	nil,
 
 	// 0xF0 - 0xFF
@@ -291,6 +291,7 @@ var CodeToOp = [256]op {
 	nil,
 	nil,
 	nil,
+	func() { inc(zeroPageX); pc += 2 },
 	nil,
 	nil,
 	nil,
@@ -298,6 +299,5 @@ var CodeToOp = [256]op {
 	nil,
 	nil,
 	nil,
-	nil,
-	nil,
+	func() { inc(absoluteX); pc += 3 },
 	nil}
