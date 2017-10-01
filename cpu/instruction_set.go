@@ -26,6 +26,21 @@ func pushWord(value uint16) {
 	pushByte(uint8(value))
 }
 
+func pullByte() uint8 {
+	sp++
+	return Stack[sp]
+}
+
+func pullWord() uint16 {
+	addressLo := pullByte()
+	addressHi := pullByte()
+	return uint16(addressLo) + (uint16(addressHi) << 8)
+}
+
+func getBit(value, index uint8) bool {
+	return value & (1 << index) != 0
+}
+
 // base for branches
 func jumpIfTrue(condition bool) {
 	if condition {
@@ -291,5 +306,127 @@ func lsr(addressingMode func() *uint8) {
 }
 
 func nop() {
+	pc++
+}
+
+func ora(addressingMode func() *uint8) {
+	a |= *addressingMode()
+	setZeroAndNegative(a)
+}
+
+func pha() {
+	pushByte(a)
+	pc++
+}
+
+func php() {
+	pushByte(getPs())
+	pc++
+}
+
+func pla() {
+	a = pullByte()
+	pc++
+}
+
+func plp() {
+	setPs(pullByte())
+	pc++
+}
+
+func rol(addressingMode func() *uint8) {
+	ptr := addressingMode()
+	newCarry := getBit(*ptr, 7)
+	*ptr <<= 1
+	if carry {
+		*ptr++
+	}
+	carry = newCarry
+	setZeroAndNegative(*ptr)
+}
+
+func ror(addressingMode func() *uint8) {
+	ptr := addressingMode()
+	newCarry := getBit(*ptr, 0)
+	*ptr >>= 1
+	if carry {
+		*ptr += 128
+	}
+	carry = newCarry
+	setZeroAndNegative(*ptr)
+}
+
+func rti() {
+	setPs(pullByte())
+	pc = pullWord()
+}
+
+func rts() {
+	pc = pullWord() + 1
+}
+
+func sbc(addressingMode func() *uint8) {
+	// TODO: implement
+}
+
+func sec() {
+	carry = true
+	pc++
+}
+
+func sed() {
+	decimalMode = true
+	pc++
+}
+
+func sei() {
+	interruptDisable = true
+	pc++
+}
+
+func sta(addressingMode func() *uint8) {
+	*addressingMode() = a
+}
+
+func stx(addressingMode func() *uint8) {
+	*addressingMode() = x
+}
+
+func sty(addressingMode func() *uint8) {
+	*addressingMode() = y
+}
+
+func tax() {
+	x = a
+	setZeroAndNegative(x)
+	pc++
+}
+
+func tay() {
+	y = a
+	setZeroAndNegative(y)
+	pc++
+}
+
+func tsx() {
+	x = sp
+	setZeroAndNegative(x)
+	pc++
+}
+
+func txa() {
+	a = x
+	setZeroAndNegative(a)
+	pc++
+}
+
+func txs() {
+	sp = x
+	pc++
+}
+
+func tya() {
+	a = y
+	setZeroAndNegative(a)
 	pc++
 }
