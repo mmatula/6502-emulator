@@ -1,7 +1,5 @@
 package cpu
 
-import "go/ast"
-
 // helper functions
 func setZeroAndNegative(value uint8) {
 	zero = value == 0
@@ -9,11 +7,17 @@ func setZeroAndNegative(value uint8) {
 }
 
 func readUInt16(address uint16) uint16 {
-	return uint16(Memory[address]) + uint16(Memory[address + 1]) << 8
+	return uint16(Memory[address]) + (uint16(Memory[address + 1]) << 8)
+}
+
+func readUInt16WithError(address uint16) uint16 {
+	addressLo := address & 0x00FF
+	addressHi := address & 0xFF00
+	return uint16(Memory[address]) + (uint16(Memory[addressHi + ((addressLo + 1) & 0x00FF)]) << 8)
 }
 
 func pushByte(value uint8) {
-	Memory[0x0100 + sp] = value
+	Stack[sp] = value
 	sp--
 }
 
@@ -78,20 +82,45 @@ func absoluteAddress() uint16 {
 }
 
 func indirectAddress() uint16 {
-	return readUInt16(absoluteAddress())
+	return readUInt16WithError(absoluteAddress())
 }
 
 // ------ INSTRUCTIONS -------
 func adc(addressingMode func() *uint8) {
-	prevA := a
 	value := *addressingMode()
-	a += value
+
+	var carryInc uint8 = 0
 	if carry {
-		a++
+		carryInc = 1
 	}
-	setZeroAndNegative(a)
-	carry = a <= value
-	overflow = (prevA >= 128 && a < 128) || (prevA < 128 && a >= 128)
+
+	if decimalMode {
+		aL := a & 0x0F + value & 0x0F + carryInc;
+		aH := a >> 4 + value >> 4;
+		if aL > 0x0F {
+			aH++
+		}
+		if aL > 0x09 {
+			aL += 0x06
+		}
+		zero = a + value + carryInc == 0
+		negative = aH & 0x08 != 0
+		overflow = (a & 0x80 == value & 0x80) && (a & 0x80 != (aH << 4) & 0x80)
+		if aH > 0x09 {
+			aH += 0x06
+		}
+		carry = aH > 0x0F
+		a = (aH << 4) + (aL & 0x0F)
+	} else {
+		newValue := uint16(a) + uint16(value)
+		if carry {
+			newValue++
+		}
+		carry = newValue > 0xFF
+		overflow = (a & 0x80 == value & 0x80) && (a & 0x80 != uint8(newValue) & 0x80)
+		a = uint8(newValue)
+		setZeroAndNegative(a)
+	}
 }
 
 func and(addressingMode func() *uint8) {

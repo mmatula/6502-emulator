@@ -9,6 +9,7 @@ var carry, zero, interruptDisable, decimalMode, breakCommand, overflow, negative
 
 // memory
 var Memory [65536]uint8
+var Stack []uint8 = Memory[0x0100:0x01FF]
 
 // instruction set
 type op func()
@@ -99,7 +100,7 @@ var CodeToOp = [256]op {
 	func() { eor(immediate); pc += 2 },
 	func() { lsr(accumulator); pc++ },
 	nil,
-	func() { jmp(absoluteAddress); pc += 3 },
+	func() { jmp(absoluteAddress) },
 	func() { eor(absolute); pc += 3 },
 	func() { lsr(absolute); pc += 3 },
 	nil,
@@ -135,7 +136,7 @@ var CodeToOp = [256]op {
 	func() { adc(immediate); pc += 2 },
 	nil,
 	nil,
-	func() { jmp(indirectAddress); pc += 3 },
+	func() { jmp(indirectAddress) },
 	func() { adc(absolute); pc += 3 },
 	nil,
 	nil,
