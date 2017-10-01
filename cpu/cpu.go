@@ -7,6 +7,42 @@ var a uint8				// accumulator
 var x, y uint8			// index registers
 var carry, zero, interruptDisable, decimalMode, breakCommand, overflow, negative bool	// processor status (flags)
 
+func getPs() uint8 {
+	var result uint8 = 32
+	if carry {
+		result += 1
+	}
+	if zero {
+		result += 2
+	}
+	if interruptDisable {
+		result += 4
+	}
+	if decimalMode {
+		result += 8
+	}
+	if breakCommand {
+		result += 16
+	}
+	if overflow {
+		result += 64
+	}
+	if negative {
+		result += 128
+	}
+	return result
+}
+
+func setPs(ps uint8) {
+	carry = ps & 1 == 1
+	zero = ps & 2 == 2
+	interruptDisable = ps & 4 == 4
+	decimalMode = ps & 8 == 8
+	breakCommand = ps & 16 == 16
+	overflow = ps & 64 == 64
+	negative = ps & 128 == 128
+}
+
 // memory
 var Memory [65536]uint8
 var Stack []uint8 = Memory[0x0100:0x01FF]
