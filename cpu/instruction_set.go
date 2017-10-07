@@ -197,8 +197,9 @@ func ldy(addressingMode func() *uint8) {
 }
 
 func brk() {
-	breakCommand = true
-	// TODO: dodělat
+	pushWord(pc + 2)
+	pushByte(getPs())
+	pc = 0xFFFE
 }
 
 func bvc() {

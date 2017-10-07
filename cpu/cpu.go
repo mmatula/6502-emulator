@@ -1,11 +1,15 @@
 package cpu
 
+import "time"
+
 // registers
 var pc uint16 = 0		// program counter
 var sp uint8 = 0xFF		// stack pointer
 var a uint8				// accumulator
 var x, y uint8			// index registers
 var carry, zero, interruptDisable, decimalMode, breakCommand, overflow, negative bool	// processor status (flags)
+
+const freq int64 = 985000
 
 func getPs() uint8 {
 	var result uint8 = 32
@@ -338,3 +342,12 @@ var CodeToOp = [256]op {
 	func() { sbc(absoluteX); pc += 3 },
 	func() { inc(absoluteX); pc += 3 },
 	nil}
+
+func run(address uint16) {
+	ticker := time.NewTicker(time.Duration(1000000000 / freq))
+	pc = address
+	for CodeToOp[Memory[pc]] != nil {
+		<- ticker.C
+		CodeToOp[Memory[pc]]()
+	}
+}
