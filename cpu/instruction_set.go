@@ -1,5 +1,9 @@
 package cpu
 
+import "errors"
+
+type amode func(bool) *uint8
+
 // helper functions
 func setZeroAndNegative(value uint8) {
 	zero = value == 0
@@ -7,18 +11,21 @@ func setZeroAndNegative(value uint8) {
 }
 
 func readUInt16(address uint16) uint16 {
+	ticksToNext += 2
 	return uint16(Memory[address]) + (uint16(Memory[address + 1]) << 8)
 }
 
 func readUInt16WithError(address uint16) uint16 {
 	addressLo := address & 0x00FF
 	addressHi := address & 0xFF00
+	ticksToNext += 2
 	return uint16(Memory[address]) + (uint16(Memory[addressHi + ((addressLo + 1) & 0x00FF)]) << 8)
 }
 
 func pushByte(value uint8) {
 	Stack[sp] = value
 	sp--
+	ticksToNext++
 }
 
 func pushWord(value uint16) {
@@ -28,6 +35,7 @@ func pushWord(value uint16) {
 
 func pullByte() uint8 {
 	sp++
+	ticksToNext++
 	return Stack[sp]
 }
 
@@ -42,53 +50,112 @@ func getBit(value, index uint8) bool {
 }
 
 // base for branches
-func jumpIfTrue(condition bool) {
+func jumpIfTrue(condition, isBvc bool) {
 	if condition {
+		ticksToNext++
+		oldPc := pc + 2
 		pc = uint16(int(pc) + int(int8(Memory[pc + 1])))
+		if !isBvc && (oldPc & 0xFF00 < pc & 0xFF00) {
+			ticksToNext++
+		}
 	} else {
 		pc += 2
 	}
+	ticksToNext++
+}
+
+func consumeTicksForWrite(write bool) {
+	if write {
+		ticksToNext += 2
+	}
+}
+
+func incrementPc(increment uint16) {
+	pc += increment
 }
 
 // ------ VALUE ADDRESSING MODES -------
-func immediate() *uint8 {
+func immediate(write bool) *uint8 {
+	if write {
+		errors.New("should never happen")
+	}
+	ticksToNext++
+	defer incrementPc(2)
 	return &Memory[pc + 1]
 }
 
-func accumulator() *uint8 {
+func accumulator(write bool) *uint8 {
+	if !write {
+		errors.New("should never happen")
+	}
+	ticksToNext++
+	pc += 1
 	return &a
 }
 
-func zeroPage() *uint8 {
-	return &Memory[Memory[pc + 1]]
+func zeroPageIndexed(address uint16, index uint8, write bool) *uint8 {
+	consumeTicksForWrite(write)
+	pc += 2
+	ticksToNext += 2
+	return &Memory[Memory[address] + index]
 }
 
-func zeroPageX() *uint8 {
-	return &Memory[Memory[pc + 1] + x]
+func zeroPage(write bool) *uint8 {
+	return zeroPageIndexed(pc + 1, 0, write)
 }
 
-func zeroPageY() *uint8 {
-	return &Memory[Memory[pc + 1] + y]
+func zeroPageX(write bool) *uint8 {
+	ticksToNext++
+	return zeroPageIndexed(pc + 1, x, write)
 }
 
-func absolute() *uint8 {
+func zeroPageY(write bool) *uint8 {
+	ticksToNext++
+	return zeroPageIndexed(pc + 1, y, write)
+}
+
+func absolute(write bool) *uint8 {
+	consumeTicksForWrite(write)
+	defer incrementPc(3)
+	ticksToNext++
 	return &Memory[absoluteAddress()]
 }
 
-func absoluteX() *uint8 {
-	return &Memory[absoluteAddress() + uint16(x)]
+func absoluteIndexed(address uint16, index uint8, write bool) *uint8 {
+	ticksToNext++
+	indexedAddress := address + uint16(index)
+	if write || (address & 0xFF00 < indexedAddress & 0xFF00) {
+		ticksToNext++
+	}
+	pc += 3
+	consumeTicksForWrite(write)
+	return &Memory[indexedAddress]
 }
 
-func absoluteY() *uint8 {
-	return &Memory[absoluteAddress() + uint16(y)]
+func absoluteX(write bool) *uint8 {
+	return absoluteIndexed(absoluteAddress(), x, write)
 }
 
-func indexedIndirect() *uint8 {
+func absoluteY(write bool) *uint8 {
+	return absoluteIndexed(absoluteAddress(), y, write)
+}
+
+func indexedIndirect(write bool) *uint8 {
+	if write {
+		errors.New("should never happen")
+	}
+	defer incrementPc(2)
+	ticksToNext += 3
 	return &Memory[readUInt16(uint16(Memory[pc + 1] + x))]
 }
 
-func indirectIndexed() *uint8 {
-	return &Memory[readUInt16(uint16(Memory[pc + 1])) + uint16(y)]
+func indirectIndexed(write bool) *uint8 {
+	if write {
+		errors.New("should never happen")
+	}
+	defer incrementPc(2)
+	ticksToNext++
+	return absoluteIndexed(readUInt16(uint16(Memory[pc + 1])), y, write)
 }
 
 // ------ POINTER ADDRESSING MODES ------
@@ -101,8 +168,8 @@ func indirectAddress() uint16 {
 }
 
 // ------ INSTRUCTIONS -------
-func adc(addressingMode func() *uint8) {
-	value := *addressingMode()
+func adc(addressingMode amode) {
+	value := *addressingMode(false)
 
 	var carryInc uint8 = 0
 	if carry {
@@ -110,8 +177,8 @@ func adc(addressingMode func() *uint8) {
 	}
 
 	if decimalMode {
-		aL := a & 0x0F + value & 0x0F + carryInc;
-		aH := a >> 4 + value >> 4;
+		aL := a & 0x0F + value & 0x0F + carryInc
+		aH := a >> 4 + value >> 4
 		if aL > 0x0F {
 			aH++
 		}
@@ -120,7 +187,7 @@ func adc(addressingMode func() *uint8) {
 		}
 		zero = a + value + carryInc == 0
 		negative = aH & 0x08 != 0
-		overflow = (a & 0x80 == value & 0x80) && (a & 0x80 != (aH << 4) & 0x80)
+		overflow = (a & 0x80 == value & 0x80) && (value & 0x80 != (aH << 4) & 0x80)
 		if aH > 0x09 {
 			aH += 0x06
 		}
@@ -132,124 +199,114 @@ func adc(addressingMode func() *uint8) {
 			newValue++
 		}
 		carry = newValue > 0xFF
-		overflow = (a & 0x80 == value & 0x80) && (a & 0x80 != uint8(newValue) & 0x80)
+		overflow = (a & 0x80 == value & 0x80) && (value & 0x80 != uint8(newValue) & 0x80)
 		a = uint8(newValue)
 		setZeroAndNegative(a)
 	}
 }
 
-func and(addressingMode func() *uint8) {
-	a &= *addressingMode()
+func and(addressingMode amode) {
+	a &= *addressingMode(false)
 	setZeroAndNegative(a)
 }
 
-func asl(addressingMode func() *uint8) {
-	ptr := addressingMode()
+func asl(addressingMode amode) {
+	ptr := addressingMode(true)
 	carry = *ptr >= 128
 	*ptr <<= 1
 	setZeroAndNegative(*ptr)
 }
 
 func bcc() {
-	jumpIfTrue(!carry)
+	jumpIfTrue(!carry, false)
 }
 
 func bcs() {
-	jumpIfTrue(carry)
+	jumpIfTrue(carry, false)
 }
 
 func beq() {
-	jumpIfTrue(zero)
+	jumpIfTrue(zero, false)
 }
 
-func bit(addressingMode func() *uint8) {
-	value := *addressingMode()
+func bit(addressingMode amode) {
+	value := *addressingMode(false)
 	negative = value & 128 == 128
 	overflow = value & 64 == 64
 	zero = value & a == 0
 }
 
 func bmi() {
-	jumpIfTrue(negative)
+	jumpIfTrue(negative, false)
 }
 
 func bne() {
-	jumpIfTrue(!zero)
+	jumpIfTrue(!zero, false)
 }
 
 func bpl() {
-	jumpIfTrue(!negative)
-}
-
-func lda(addressingMode func() *uint8) {
-	a = *addressingMode()
-	setZeroAndNegative(a)
-}
-
-func ldx(addressingMode func() *uint8) {
-	x = *addressingMode()
-	setZeroAndNegative(x)
-}
-
-func ldy(addressingMode func() *uint8) {
-	y = *addressingMode()
-	setZeroAndNegative(y)
+	jumpIfTrue(!negative, false)
 }
 
 func brk() {
 	pushWord(pc + 2)
 	pushByte(getPs())
 	pc = 0xFFFE
+	ticksToNext += 3
 }
 
 func bvc() {
-	jumpIfTrue(!overflow)
+	jumpIfTrue(!overflow, true)
 }
 
 func bvs() {
-	jumpIfTrue(overflow)
+	jumpIfTrue(overflow, false)
 }
 
 func clc() {
 	carry = false
 	pc++
+	ticksToNext++
 }
 
 func cld() {
 	decimalMode = false
 	pc++
+	ticksToNext++
 }
 
 func cli() {
 	interruptDisable = false
 	pc++
+	ticksToNext++
 }
 
 func clv() {
 	overflow = false
 	pc++
+	ticksToNext++
 }
 
-func cmp(addressingMode func() *uint8) {
-	value := *addressingMode()
+func cmp(addressingMode amode) {
+	value := *addressingMode(false)
 	carry = a >= value
 	setZeroAndNegative(value)
 }
 
-func cpx(addressingMode func() *uint8) {
-	value := *addressingMode()
+func cpx(addressingMode amode) {
+	value := *addressingMode(false)
 	carry = x >= value
 	setZeroAndNegative(x)
 }
 
-func cpy(addressingMode func() *uint8) {
-	value := *addressingMode()
+func cpy(addressingMode amode) {
+	value := *addressingMode(false)
 	carry = y >= value
 	setZeroAndNegative(y)
 }
 
-func dec(addressingMode func() *uint8) {
-	ptr := addressingMode()
+func dec(addressingMode amode) {
+	ptr := addressingMode(true)
 	*ptr--
 	setZeroAndNegative(*ptr)
 }
@@ -258,21 +315,23 @@ func dex() {
 	x--
 	setZeroAndNegative(x)
 	pc++
+	ticksToNext++
 }
 
 func dey() {
 	y--
 	setZeroAndNegative(y)
 	pc++
+	ticksToNext++
 }
 
-func eor(addressingMode func() *uint8) {
-	a ^= *addressingMode()
+func eor(addressingMode amode) {
+	a ^= *addressingMode(false)
 	setZeroAndNegative(a)
 }
 
-func inc(addressingMode func() *uint8) {
-	ptr := addressingMode()
+func inc(addressingMode amode) {
+	ptr := addressingMode(true)
 	*ptr++
 	setZeroAndNegative(*ptr)
 }
@@ -281,12 +340,14 @@ func inx() {
 	x++
 	setZeroAndNegative(x)
 	pc++
+	ticksToNext++
 }
 
 func iny() {
 	y++
 	setZeroAndNegative(y)
 	pc++
+	ticksToNext++
 }
 
 func jmp(addressingMode func() uint16) {
@@ -296,10 +357,26 @@ func jmp(addressingMode func() uint16) {
 func jsr() {
 	pushWord(pc + 2)
 	pc = absoluteAddress()
+	ticksToNext++
 }
 
-func lsr(addressingMode func() *uint8) {
-	ptr := addressingMode()
+func lda(addressingMode amode) {
+	a = *addressingMode(false)
+	setZeroAndNegative(a)
+}
+
+func ldx(addressingMode amode) {
+	x = *addressingMode(false)
+	setZeroAndNegative(x)
+}
+
+func ldy(addressingMode amode) {
+	y = *addressingMode(false)
+	setZeroAndNegative(y)
+}
+
+func lsr(addressingMode amode) {
+	ptr := addressingMode(true)
 	carry = *ptr & 1 == 1
 	*ptr >>= 1
 	zero = *ptr == 0
@@ -308,35 +385,40 @@ func lsr(addressingMode func() *uint8) {
 
 func nop() {
 	pc++
+	ticksToNext++
 }
 
-func ora(addressingMode func() *uint8) {
-	a |= *addressingMode()
+func ora(addressingMode amode) {
+	a |= *addressingMode(false)
 	setZeroAndNegative(a)
 }
 
 func pha() {
 	pushByte(a)
 	pc++
+	ticksToNext++
 }
 
 func php() {
 	pushByte(getPs())
 	pc++
+	ticksToNext++
 }
 
 func pla() {
 	a = pullByte()
 	pc++
+	ticksToNext += 2
 }
 
 func plp() {
 	setPs(pullByte())
 	pc++
+	ticksToNext += 2
 }
 
-func rol(addressingMode func() *uint8) {
-	ptr := addressingMode()
+func rol(addressingMode amode) {
+	ptr := addressingMode(true)
 	newCarry := getBit(*ptr, 7)
 	*ptr <<= 1
 	if carry {
@@ -346,8 +428,8 @@ func rol(addressingMode func() *uint8) {
 	setZeroAndNegative(*ptr)
 }
 
-func ror(addressingMode func() *uint8) {
-	ptr := addressingMode()
+func ror(addressingMode amode) {
+	ptr := addressingMode(true)
 	newCarry := getBit(*ptr, 0)
 	*ptr >>= 1
 	if carry {
@@ -360,74 +442,113 @@ func ror(addressingMode func() *uint8) {
 func rti() {
 	setPs(pullByte())
 	pc = pullWord()
+	ticksToNext += 2
 }
 
 func rts() {
 	pc = pullWord() + 1
+	ticksToNext += 3
 }
 
-func sbc(addressingMode func() *uint8) {
-	// TODO: implement
+func sbc(addressingMode amode) {
+	value := *addressingMode(false)
+
+	var carryDec uint8 = 0
+	if !carry {
+		carryDec = 1
+	}
+
+	newValue := uint16(a) - uint16(value) - uint16(carryDec)
+	overflow = (a & 0x80 != value & 0x80) && (value & 0x80 == uint8(newValue) & 0x80)
+
+	if decimalMode {
+		aL := a & 0x0F - value & 0x0F - carryDec
+		aH := a >> 4 - value >> 4
+		if aL > 0x0F {
+			aL -= 0x06
+			aH--
+		}
+		if aH > 0x0F {
+			aH -= 0x06
+		}
+		a = (aH << 4) + (aL & 0x0F)
+	} else {
+		a = uint8(newValue)
+	}
+	carry = newValue < 0x0100
+	setZeroAndNegative(a)
 }
 
 func sec() {
 	carry = true
 	pc++
+	ticksToNext++
 }
 
 func sed() {
 	decimalMode = true
 	pc++
+	ticksToNext++
 }
 
 func sei() {
 	interruptDisable = true
 	pc++
+	ticksToNext++
 }
 
-func sta(addressingMode func() *uint8) {
-	*addressingMode() = a
+func sta(addressingMode amode) {
+	*addressingMode(true) = a
+	ticksToNext -= 2
 }
 
-func stx(addressingMode func() *uint8) {
-	*addressingMode() = x
+func stx(addressingMode amode) {
+	*addressingMode(true) = x
+	ticksToNext -= 2
 }
 
-func sty(addressingMode func() *uint8) {
-	*addressingMode() = y
+func sty(addressingMode amode) {
+	*addressingMode(true) = y
+	ticksToNext -= 2
 }
 
 func tax() {
 	x = a
 	setZeroAndNegative(x)
 	pc++
+	ticksToNext++
 }
 
 func tay() {
 	y = a
 	setZeroAndNegative(y)
 	pc++
+	ticksToNext++
 }
 
 func tsx() {
 	x = sp
 	setZeroAndNegative(x)
 	pc++
+	ticksToNext++
 }
 
 func txa() {
 	a = x
 	setZeroAndNegative(a)
 	pc++
+	ticksToNext++
 }
 
 func txs() {
 	sp = x
 	pc++
+	ticksToNext++
 }
 
 func tya() {
 	a = y
 	setZeroAndNegative(a)
 	pc++
+	ticksToNext++
 }
